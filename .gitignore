@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.cache/
+
+# Old model files
+chat_gpt.pth
+gpt_model.pth
+gpt_v2.pth
+gpt_v3.pth
+gpt_v5.pth
+gpt_v6.pth
+model.pth
+token_gpt.pth
