@@ -15,7 +15,7 @@ app = Flask(__name__)
 
 
 # ==========================================
-# MODEL FILE PATH
+# MODEL PATH
 # ==========================================
 
 BASE_DIR = os.path.dirname(
@@ -29,7 +29,7 @@ MODEL_PATH = os.path.join(
 
 
 # ==========================================
-# LOAD MODEL
+# LOAD CHECKPOINT
 # ==========================================
 
 checkpoint = torch.load(
@@ -43,18 +43,13 @@ vocabulary = checkpoint["vocabulary"]
 
 
 # ==========================================
-# TOKEN → ID
+# TOKEN DICTIONARIES
 # ==========================================
 
 stoi = {
     token: i
     for i, token in enumerate(vocabulary)
 }
-
-
-# ==========================================
-# ID → TOKEN
-# ==========================================
 
 itos = {
     i: token
@@ -75,17 +70,12 @@ model = GPTv5(
 
 
 # ==========================================
-# LOAD TRAINED WEIGHTS
+# LOAD TRAINED MODEL
 # ==========================================
 
 model.load_state_dict(
     checkpoint["model_state_dict"]
 )
-
-
-# ==========================================
-# EVALUATION MODE
-# ==========================================
 
 model.eval()
 
@@ -100,17 +90,14 @@ def decode(tokens):
 
     for token in tokens:
 
-        # New line
         if token == "\n":
             result += "\n"
             continue
 
-        # Punctuation
         if token in [".", ",", "!", "?", ":"]:
             result += token
             continue
 
-        # Word starts with ▁
         if token.startswith("▁"):
 
             word = token[1:]
@@ -123,7 +110,6 @@ def decode(tokens):
             result += word
 
         else:
-
             result += token
 
     return result
@@ -144,7 +130,7 @@ def generate_answer(question):
 
 
     # ======================================
-    # TOKENIZE
+    # TOKENIZE QUESTION
     # ======================================
 
     prompt_tokens = tokenize(prompt)
@@ -164,7 +150,7 @@ def generate_answer(question):
 
 
     # ======================================
-    # CREATE TENSOR
+    # CREATE INPUT TENSOR
     # ======================================
 
     context = torch.tensor(
@@ -174,16 +160,17 @@ def generate_answer(question):
 
 
     # ======================================
-    # GENERATION
+    # GENERATE TOKENS
     # ======================================
 
     with torch.inference_mode():
 
-        # Generate maximum 20 tokens
+        # Maximum 20 generated tokens
         for _ in range(20):
 
-            # Keep latest 128 tokens
-            context_input = context[:, -128:]
+            # Use only the latest 32 tokens
+            # This is faster on Render CPU
+            context_input = context[:, -32:]
 
 
             # Model prediction
@@ -192,7 +179,7 @@ def generate_answer(question):
             )
 
 
-            # Get last token prediction
+            # Get prediction for final position
             logits = logits[:, -1, :]
 
 
@@ -215,7 +202,7 @@ def generate_answer(question):
             )
 
 
-            # Add token to context
+            # Add new token
             context = torch.cat(
                 [
                     context,
@@ -225,19 +212,19 @@ def generate_answer(question):
             )
 
 
-            # Convert ID → token
+            # Convert token ID to text
             next_text = itos[
                 next_token.item()
             ]
 
 
-            # Stop at new line
+            # Stop at newline
             if next_text == "\n":
                 break
 
 
     # ======================================
-    # GET ALL TOKENS
+    # GET GENERATED TOKENS
     # ======================================
 
     all_tokens = [
@@ -246,7 +233,7 @@ def generate_answer(question):
     ]
 
 
-    # Remove prompt tokens
+    # Remove prompt
     generated_tokens = all_tokens[
         len(prompt_tokens):
     ]
@@ -262,7 +249,7 @@ def generate_answer(question):
 
 
     # ======================================
-    # REMOVE EXTRA USER PROMPT
+    # REMOVE UNWANTED CONTINUATION
     # ======================================
 
     if "User:" in answer:
@@ -277,7 +264,7 @@ def generate_answer(question):
 
 
 # ==========================================
-# HTML PAGE
+# HTML
 # ==========================================
 
 HTML = """
@@ -288,6 +275,9 @@ HTML = """
 <head>
 
 <title>My GPT v7</title>
+
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
 
 <style>
 
@@ -307,13 +297,11 @@ body {
 
 }
 
-
 h1 {
 
     text-align: center;
 
 }
-
 
 textarea {
 
@@ -329,8 +317,9 @@ textarea {
 
     border-radius: 10px;
 
-}
+    resize: vertical;
 
+}
 
 button {
 
@@ -346,7 +335,6 @@ button {
 
 }
 
-
 .answer {
 
     margin-top: 30px;
@@ -358,6 +346,8 @@ button {
     border-radius: 10px;
 
     white-space: pre-wrap;
+
+    line-height: 1.5;
 
 }
 
@@ -374,21 +364,17 @@ button {
 
 <form method="POST">
 
-
 <textarea
 name="question"
 placeholder="Ask something..."
 required
 >{{ question }}</textarea>
 
-
 <br>
-
 
 <button type="submit">
 Ask GPT
 </button>
-
 
 </form>
 
@@ -453,7 +439,7 @@ def home():
 
 
 # ==========================================
-# RUN LOCALLY
+# RUN APP
 # ==========================================
 
 if __name__ == "__main__":
