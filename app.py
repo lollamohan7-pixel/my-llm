@@ -1,4 +1,5 @@
 from flask import Flask, request, render_template_string
+import os
 import torch
 import torch.nn.functional as F
 
@@ -14,11 +15,25 @@ app = Flask(__name__)
 
 
 # ==========================================
+# MODEL FILE PATH
+# ==========================================
+
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
+)
+
+MODEL_PATH = os.path.join(
+    BASE_DIR,
+    "gpt_v7.pth"
+)
+
+
+# ==========================================
 # LOAD MODEL
 # ==========================================
 
 checkpoint = torch.load(
-    "gpt_v7.pth",
+    MODEL_PATH,
     map_location="cpu",
     weights_only=True
 )
@@ -27,16 +42,29 @@ vocab_size = checkpoint["vocab_size"]
 vocabulary = checkpoint["vocabulary"]
 
 
+# ==========================================
+# TOKEN → ID
+# ==========================================
+
 stoi = {
     token: i
     for i, token in enumerate(vocabulary)
 }
+
+
+# ==========================================
+# ID → TOKEN
+# ==========================================
 
 itos = {
     i: token
     for i, token in enumerate(vocabulary)
 }
 
+
+# ==========================================
+# CREATE MODEL
+# ==========================================
 
 model = GPTv5(
     vocab_size=vocab_size,
@@ -45,9 +73,19 @@ model = GPTv5(
     num_blocks=4
 )
 
+
+# ==========================================
+# LOAD TRAINED WEIGHTS
+# ==========================================
+
 model.load_state_dict(
     checkpoint["model_state_dict"]
 )
+
+
+# ==========================================
+# EVALUATION MODE
+# ==========================================
 
 model.eval()
 
@@ -62,14 +100,17 @@ def decode(tokens):
 
     for token in tokens:
 
+        # New line
         if token == "\n":
             result += "\n"
             continue
 
+        # Punctuation
         if token in [".", ",", "!", "?", ":"]:
             result += token
             continue
 
+        # Word starts with ▁
         if token.startswith("▁"):
 
             word = token[1:]
@@ -94,13 +135,24 @@ def decode(tokens):
 
 def generate_answer(question):
 
+    # Create prompt
     prompt = (
         "User: "
         + question
         + "\nAssistant:"
     )
 
+
+    # ======================================
+    # TOKENIZE
+    # ======================================
+
     prompt_tokens = tokenize(prompt)
+
+
+    # ======================================
+    # TOKEN → ID
+    # ======================================
 
     token_ids = [
         stoi.get(
@@ -110,33 +162,60 @@ def generate_answer(question):
         for token in prompt_tokens
     ]
 
+
+    # ======================================
+    # CREATE TENSOR
+    # ======================================
+
     context = torch.tensor(
         [token_ids],
         dtype=torch.long
     )
 
-    with torch.no_grad():
 
-        for _ in range(80):
+    # ======================================
+    # GENERATION
+    # ======================================
 
+    with torch.inference_mode():
+
+        # Generate maximum 20 tokens
+        for _ in range(20):
+
+            # Keep latest 128 tokens
             context_input = context[:, -128:]
 
-            logits = model(context_input)
 
+            # Model prediction
+            logits = model(
+                context_input
+            )
+
+
+            # Get last token prediction
             logits = logits[:, -1, :]
 
+
+            # Temperature
             logits = logits / 0.7
 
+
+            # Convert logits to probabilities
             probabilities = F.softmax(
                 logits,
                 dim=-1
             )
 
-            next_token = torch.multinomial(
+
+            # Choose most likely token
+            next_token = torch.argmax(
                 probabilities,
-                1
+                dim=-1,
+                keepdim=True
             )
 
+
+            # Add token to context
             context = torch.cat(
                 [
                     context,
@@ -145,37 +224,60 @@ def generate_answer(question):
                 dim=1
             )
 
+
+            # Convert ID → token
             next_text = itos[
                 next_token.item()
             ]
 
+
+            # Stop at new line
             if next_text == "\n":
                 break
+
+
+    # ======================================
+    # GET ALL TOKENS
+    # ======================================
 
     all_tokens = [
         itos[i.item()]
         for i in context[0]
     ]
 
+
+    # Remove prompt tokens
     generated_tokens = all_tokens[
         len(prompt_tokens):
     ]
+
+
+    # ======================================
+    # DECODE
+    # ======================================
 
     answer = decode(
         generated_tokens
     )
 
+
+    # ======================================
+    # REMOVE EXTRA USER PROMPT
+    # ======================================
+
     if "User:" in answer:
+
         answer = answer.split(
             "User:",
             1
         )[0]
 
+
     return answer.strip()
 
 
 # ==========================================
-# WEB PAGE
+# HTML PAGE
 # ==========================================
 
 HTML = """
@@ -185,57 +287,93 @@ HTML = """
 
 <head>
 
-<title>My GPT</title>
+<title>My GPT v7</title>
 
 <style>
 
 body {
+
     font-family: Arial, sans-serif;
+
     background: #111;
+
     color: white;
+
     max-width: 800px;
+
     margin: 50px auto;
+
     padding: 20px;
+
 }
+
 
 h1 {
+
     text-align: center;
+
 }
+
 
 textarea {
+
     width: 100%;
+
     height: 100px;
+
     padding: 15px;
+
     font-size: 16px;
+
     box-sizing: border-box;
+
     border-radius: 10px;
+
 }
+
 
 button {
+
     margin-top: 15px;
+
     padding: 12px 25px;
+
     font-size: 16px;
+
     cursor: pointer;
+
     border-radius: 8px;
+
 }
 
+
 .answer {
+
     margin-top: 30px;
+
     padding: 20px;
+
     background: #222;
+
     border-radius: 10px;
+
     white-space: pre-wrap;
+
 }
 
 </style>
 
 </head>
 
+
 <body>
+
 
 <h1>🤖 My GPT v7</h1>
 
+
 <form method="POST">
+
 
 <textarea
 name="question"
@@ -243,13 +381,17 @@ placeholder="Ask something..."
 required
 >{{ question }}</textarea>
 
+
 <br>
+
 
 <button type="submit">
 Ask GPT
 </button>
 
+
 </form>
+
 
 {% if answer %}
 
@@ -265,6 +407,7 @@ Ask GPT
 
 {% endif %}
 
+
 </body>
 
 </html>
@@ -272,14 +415,20 @@ Ask GPT
 
 
 # ==========================================
-# ROUTE
+# HOME ROUTE
 # ==========================================
 
-@app.route("/", methods=["GET", "POST"])
+@app.route(
+    "/",
+    methods=["GET", "POST"]
+)
+
 def home():
 
     question = ""
+
     answer = ""
+
 
     if request.method == "POST":
 
@@ -288,11 +437,13 @@ def home():
             ""
         )
 
+
         if question.strip():
 
             answer = generate_answer(
                 question
             )
+
 
     return render_template_string(
         HTML,
